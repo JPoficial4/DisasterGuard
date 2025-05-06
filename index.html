@@ -1,0 +1,90 @@
+// Full Disaster Risk Prediction Map Code
+
+const GEO_NAMES_USERNAME = "JP@oficial";
+const OPEN_WEATHER_API_KEY = "12959d301e62971ebdec14966a2c52af";
+const EM_DAT_JSON_URL = "https://public.emdat.be/graphql/files/public_emdat_custom_request_2025-05-05_3206c0d8-2040-42d9-a8f6-cd62a64ff2d1.json";
+
+// Initialize Leaflet map
+const map = L.map('map', {
+  worldCopyJump: true,
+  maxBoundsViscosity: 1.0
+}).setView([20, 0], 2);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 18,
+}).addTo(map);
+
+// Fetch disaster data
+async function loadEMDATData() {
+  const response = await fetch(EM_DAT_JSON_URL);
+  const data = await response.json();
+  return data;
+}
+
+// Get city coordinates from GeoNames
+async function fetchCityCoordinates(cityName) {
+  const url = `https://secure.geonames.org/searchJSON?q=${encodeURIComponent(cityName)}&maxRows=1&username=${GEO_NAMES_USERNAME}`;
+  const response = await fetch(url);
+  const data = await response.json();
+  if (data.geonames && data.geonames.length > 0) {
+    const { lat, lng } = data.geonames[0];
+    return { lat, lng };
+  }
+  return null;
+}
+
+// Fetch weather data from OpenWeather
+async function fetchWeatherData(lat, lon) {
+  const url = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${OPEN_WEATHER_API_KEY}&units=metric`;
+  const response = await fetch(url);
+  const data = await response.json();
+  return data;
+}
+
+// Predict disaster risk level
+function predictRiskLevel(weather, disasterHistory) {
+  let risk = 0;
+  if (weather.wind.speed > 15) risk += 2;
+  if (weather.main.temp > 35 || weather.main.temp < -10) risk += 2;
+  if (weather.weather[0].main === 'Thunderstorm') risk += 2;
+  if (disasterHistory > 3) risk += 3;
+  return risk;
+}
+
+// Color by risk level
+function getRiskColor(risk) {
+  if (risk < 2) return 'yellow';
+  if (risk < 4) return 'orange';
+  if (risk < 6) return 'red';
+  return 'darkred';
+}
+
+// Add marker with weather and disaster data
+async function addCityMarker(cityName) {
+  const coords = await fetchCityCoordinates(cityName);
+  if (!coords) return;
+  const weather = await fetchWeatherData(coords.lat, coords.lng);
+  const disasterData = await loadEMDATData();
+  const history = disasterData.filter(e => e.location.includes(cityName)).length;
+  const riskLevel = predictRiskLevel(weather, history);
+  const riskColor = getRiskColor(riskLevel);
+
+  L.circleMarker([coords.lat, coords.lng], {
+    radius: 6,
+    fillColor: riskColor,
+    color: '#000',
+    weight: 1,
+    opacity: 1,
+    fillOpacity: 0.8
+  }).addTo(map).bindPopup(`
+    <b>${cityName}</b><br>
+    Temp: ${weather.main.temp}°C<br>
+    Weather: ${weather.weather[0].description}<br>
+    Wind: ${weather.wind.speed} m/s<br>
+    Disaster Events: ${history}<br>
+    Risk Level: ${riskLevel}
+  `);
+}
+
+// Example cities
+['Tokyo', 'New York', 'São Paulo', 'Paris', 'Sydney', 'Cairo'].forEach(addCityMarker);
